@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Shield shape -->
+  <path d="M50 10 L85 25 L85 45 Q85 70 50 90 Q15 70 15 45 L15 25 Z"
+        fill="#4CAF50"
+        stroke="#2E7D32"
+        stroke-width="2"/>
+
+  <!-- Inner shield detail -->
+  <path d="M50 20 L75 32 L75 47 Q75 65 50 80 Q25 65 25 47 L25 32 Z"
+        fill="#66BB6A"
+        opacity="0.6"/>
+
+</svg>
