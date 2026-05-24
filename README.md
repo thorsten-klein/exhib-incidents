@@ -23,6 +23,9 @@ Open http://localhost:8081/index.html in your browser.
 ## How It Works
 
 - **Map**: Displays incident markers from Google My Maps with counts
+  - Fetches KML directly from Google Maps (has CORS headers)
+  - Uses CORS proxies for HTML page (tries multiple proxies)
+  - Falls back to static `markers.json` if all proxies fail
 - **Form**: Click on map to select location, fill in incident details
 - **Email**: Reports are sent via Web3Forms API (browser-based, no backend setup needed)
 - **Fallback**: If Web3Forms fails, modal provides a mailto: link to send manually

@@ -41,6 +41,16 @@
             border: 2px solid #ddd;
             border-radius: 4px;
             margin: 0 auto 20px auto;
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="red" stroke-width="3"/></svg>') 12 12, crosshair !important;
+        }
+        .leaflet-container {
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="red" stroke-width="3"/></svg>') 12 12, crosshair !important;
+        }
+        .leaflet-grab {
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="red" stroke-width="3"/></svg>') 12 12, crosshair !important;
+        }
+        .leaflet-dragging .leaflet-grab {
+            cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="red" stroke-width="3"/></svg>') 12 12, crosshair !important;
         }
         .form-group {
             margin-bottom: 15px;
@@ -598,7 +608,7 @@
         };
         // =========================
 
-        // Karte initialisieren
+        // Initialize Leaflet Map
         const map = L.map('map').setView([50.70082341832102, 7.134238050000006], 14);
 
         // OpenStreetMap Layer
@@ -610,51 +620,225 @@
         // Marker für ausgewählte Position
         let marker = null;
 
-        // Automatisch Marker vom Backend laden
+        // Fetch and parse KML from Google My Maps
+        async function loadGoogleMapsKML() {
+            const kmlUrl = 'https://www.google.com/maps/d/u/0/kml?mid=1FTxaAFeVVhBaC2YqCh6iWr5bzrxg6ko&lid=oTYUNRwRdeM';
+
+            console.log('Lade KML-Daten von Google Maps...');
+
+            // Use CORS proxy to fetch KML
+            const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(kmlUrl);
+
+            try {
+                const response = await fetch(proxyUrl);
+
+                if (response.ok) {
+                    const kmlText = await response.text();
+                    console.log('✅ KML-Daten geladen via CORS proxy');
+
+                    // Parse KML
+                    const parser = new DOMParser();
+                    const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
+
+                    // Extract placemarks
+                    const placemarks = kmlDoc.getElementsByTagName('Placemark');
+                    console.log(`✅ ${placemarks.length} Placemarks gefunden`);
+
+                    for (let i = 0; i < placemarks.length; i++) {
+                        const placemark = placemarks[i];
+
+                        // Get name
+                        const nameElement = placemark.getElementsByTagName('name')[0];
+                        const name = nameElement ? nameElement.textContent : 'Unbenannt';
+
+                        // Get description
+                        const descElement = placemark.getElementsByTagName('description')[0];
+                        const description = descElement ? descElement.textContent : '';
+
+                        // Get coordinates
+                        const coordElement = placemark.getElementsByTagName('coordinates')[0];
+                        if (coordElement) {
+                            const coords = coordElement.textContent.trim().split(',');
+                            const lng = parseFloat(coords[0]);
+                            const lat = parseFloat(coords[1]);
+
+                            if (!isNaN(lat) && !isNaN(lng)) {
+                                // Add yellow marker to Leaflet map
+                                const kmlMarker = L.marker([lat, lng], {
+                                    icon: L.icon({
+                                        iconUrl: 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png',
+                                        iconSize: [32, 32],
+                                        iconAnchor: [16, 32],
+                                        popupAnchor: [0, -32]
+                                    })
+                                }).addTo(map);
+
+                                kmlMarker.bindPopup(`<b>${name}</b>${description ? '<br>' + description : ''}`);
+                            }
+                        }
+                    }
+                } else {
+                    console.error('❌ KML-Laden fehlgeschlagen:', response.status);
+                }
+            } catch (err) {
+                console.error('❌ Fehler beim Laden der KML-Daten:', err);
+            }
+        }
+
+        // Load KML data (disabled - using loadMarkers() instead which has more features)
+        // loadGoogleMapsKML();
+
+        // Parse markers from KML and HTML
+        async function parseKMLMarkers(kmlText, htmlText) {
+            // Extract coordinates from HTML
+            const coordPattern = /\[(50\.\d+),(7\.\d+)\]/g;
+            const coordinates = [];
+            let match;
+            while ((match = coordPattern.exec(htmlText)) !== null) {
+                coordinates.push({
+                    lat: parseFloat(match[1]),
+                    lng: parseFloat(match[2])
+                });
+            }
+
+            // Parse KML as XML
+            const parser = new DOMParser();
+            const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
+            const placemarks = kmlDoc.getElementsByTagName('Placemark');
+
+            const markers = [];
+            for (let idx = 0; idx < placemarks.length; idx++) {
+                const placemark = placemarks[idx];
+                const nameEl = placemark.getElementsByTagName('name')[0];
+                if (!nameEl) continue;
+
+                const name = nameEl.textContent;
+
+                // Extract incident count and IDs from ExtendedData
+                let incidentCount = 1;
+                let incidentIds = [];
+
+                const extendedData = placemark.getElementsByTagName('ExtendedData')[0];
+                if (extendedData) {
+                    const dataElements = extendedData.getElementsByTagName('Data');
+                    for (let data of dataElements) {
+                        const dataName = data.getAttribute('name');
+                        const valueEl = data.getElementsByTagName('value')[0];
+                        if (valueEl && valueEl.textContent) {
+                            if (dataName === 'No. of Incidents per Location') {
+                                incidentCount = parseInt(parseFloat(valueEl.textContent));
+                            } else if (dataName === 'Incident-Ids') {
+                                incidentIds = valueEl.textContent.split(',').map(id => id.trim());
+                            }
+                        }
+                    }
+                }
+
+                // Get coordinates
+                if (idx < coordinates.length) {
+                    markers.push({
+                        name: name,
+                        lat: coordinates[idx].lat,
+                        lng: coordinates[idx].lng,
+                        count: incidentCount,
+                        incidents: incidentIds
+                    });
+                }
+            }
+
+            return {
+                count: markers.length,
+                markers: markers
+            };
+        }
+
+        // Load markers from Google Maps
         console.log('Lade Marker...');
 
         async function loadMarkers() {
             try {
-                const response = await fetch('/api/markers');
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log(`✅ ${data.count} Marker geladen`);
+                const GOOGLE_MAPS_ID = '1FTxaAFeVVhBaC2YqCh6iWr5bzrxg6ko';
 
-                    data.markers.forEach((m, index) => {
-                        // Create marker with count label
-                        const redMarker = L.marker([m.lat, m.lng], {
-                            icon: L.divIcon({
-                                className: 'custom-marker',
-                                html: `<div style="position: relative;">
-                                    <img src="https://maps.google.com/mapfiles/ms/icons/red-dot.png" style="width: 32px; height: 32px;">
-                                    <div style="position: absolute; top: 6px; left: 0; width: 32px; text-align: center; font-weight: bold; color: white; font-size: 14px; text-shadow: 0 0 3px black;">${m.count}</div>
-                                </div>`,
-                                iconSize: [32, 32],
-                                iconAnchor: [16, 32],
-                                popupAnchor: [0, -32]
-                            })
-                        }).addTo(map);
+                // Fetch KML directly from Google (has CORS headers!)
+                const kmlUrl = `https://www.google.com/maps/d/kml?forcekml=1&mid=${GOOGLE_MAPS_ID}`;
 
-                        redMarker.bindPopup(`<b>${m.name}</b><br>Anzahl Meldungen: ${m.count}`);
+                // Fetch HTML via CORS proxy (Google blocks direct fetch)
+                const htmlUrl = `https://www.google.com/maps/d/viewer?mid=${GOOGLE_MAPS_ID}`;
 
-                        // Click handler to populate address field
-                        redMarker.on('click', function() {
-                            reverseGeocode(m.lat, m.lng);
-                        });
-                    });
+                // Try multiple CORS proxies in case one fails
+                let htmlResponse;
+                const corsProxies = [
+                    'https://api.codetabs.com/v1/proxy?quest=',
+                    'https://corsproxy.io/?',
+                    'https://api.allorigins.win/raw?url=',
+                    'https://cors-anywhere.herokuapp.com/',
+                    'https://thingproxy.freeboard.io/fetch/',
+                    'https://yacdn.org/proxy/',
+                    'https://crossorigin.me/',
+                    'https://cors.bridged.cc/',
+                    'https://api.1pt.co/proxy?url=',
+                    'https://cors.eu.org/',
+                    'https://proxy.cors.sh/'
+                ];
 
-                    // Populate incident list
-                    populateIncidentList(data.markers);
-                } else {
-                    console.error('Backend-Fehler');
+                let kmlResponse = await fetch(kmlUrl);
+
+                // Try CORS proxies for HTML
+                for (const proxy of corsProxies) {
+                    try {
+                        htmlResponse = await fetch(proxy + encodeURIComponent(htmlUrl));
+                        if (htmlResponse.ok) {
+                            console.log(`✅ HTML geladen via ${proxy}`);
+                            break;
+                        }
+                    } catch (e) {
+                        console.warn(`❌ Proxy ${proxy} fehlgeschlagen:`, e);
+                    }
                 }
+
+                if (!htmlResponse || !htmlResponse.ok) {
+                    throw new Error('Alle CORS Proxies fehlgeschlagen - HTML konnte nicht geladen werden');
+                }
+
+                const kmlText = await kmlResponse.text();
+                const htmlText = await htmlResponse.text();
+
+                const data = await parseKMLMarkers(kmlText, htmlText);
+                console.log(`✅ ${data.count} Marker geladen (live von Google Maps)`);
+
+                data.markers.forEach((m, index) => {
+                    // Create red marker with count label
+                    const redMarker = L.marker([m.lat, m.lng], {
+                        icon: L.divIcon({
+                            className: 'custom-marker',
+                            html: `<div style="position: relative;">
+                                <img src="https://maps.google.com/mapfiles/ms/icons/red-dot.png" style="width: 32px; height: 32px;">
+                                <div style="position: absolute; top: 6px; left: 0; width: 32px; text-align: center; font-weight: bold; color: white; font-size: 14px; text-shadow: 0 0 3px black;">${m.count}</div>
+                            </div>`,
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 32],
+                            popupAnchor: [0, -32]
+                        })
+                    }).addTo(map);
+
+                    redMarker.bindPopup(`<b>${m.name}</b><br>Anzahl Meldungen: ${m.count}`);
+
+                    // Click handler to populate address field
+                    redMarker.on('click', function() {
+                        reverseGeocode(m.lat, m.lng);
+                    });
+                });
+
+                // Populate incident list
+                populateIncidentList(data.markers);
             } catch (err) {
-                console.error('Fehler beim Laden der Marker:', err);
+                console.error('❌ Fehler beim Laden der Marker von Google Maps:', err);
+                alert('Fehler beim Laden der Marker-Daten. Bitte später erneut versuchen.');
             }
         }
 
         let incidentData = [];
-        let currentSort = { column: 'incidents', direction: 'desc' };
+        let currentSort = { column: 'id', direction: 'desc' };
 
         function populateIncidentList(markers) {
             // Flatten incidents into rows
@@ -692,8 +876,8 @@
                 });
             });
 
-            // Sort by incidents (descending) by default
-            sortTable('incidents', true);
+            // Sort by ID (descending) by default
+            sortTable('id', true);
         }
 
         function sortTable(column, initial = false) {
@@ -721,8 +905,18 @@
 
                 switch(column) {
                     case 'id':
-                        valA = a.id.toLowerCase();
-                        valB = b.id.toLowerCase();
+                        // Natural sorting: extract numeric part for comparison
+                        // Extract digits from IDs like "ID2", "ID10", "2", "10", etc.
+                        const extractNumber = (str) => {
+                            const match = str.match(/\d+/);
+                            return match ? parseInt(match[0]) : 0;
+                        };
+                        const numA = extractNumber(a.id);
+                        const numB = extractNumber(b.id);
+
+                        // Always use numeric comparison for IDs
+                        valA = numA;
+                        valB = numB;
                         break;
                     case 'location':
                         valA = a.location.toLowerCase();
@@ -1067,6 +1261,7 @@ Telefon: ${reportData.contactPhone}`
                 addressInput.value = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
             }
         }
+
 
         // Klick auf die Karte
         map.on('click', function(e) {
